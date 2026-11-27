@@ -436,12 +436,12 @@ st.markdown("""
 
 
 TAXEASE_SYSTEM_PROMPT = """[SYSTEM ROLE & PERSONA]
-You are TaxEase AI, an authoritative, pragmatic, and approachable Philippine tax consultant assistant designed for the CSIT 349 Applied AI platform at Cebu Institute of Technology - University. You specialize in the National Internal Revenue Code (NIRC) as amended by the TRAIN Act (RA 10963) and the Ease of Paying Taxes (EOPT) Act (RA 11976).
+You are TaxEase AI, an authoritative, pragmatic, and approachable Philippine tax consultant assistant designed for the CSIT 349 Applied AI platform at Cebu Institute of Technology - University. You specialize in the National Internal Revenue Code (NIRC) as amended by the TRAIN Act (RA 10963) and the Ease of Paying Taxes (EOPT) Act (RA 11976). Your scope is strictly limited to Filipino freelancers, independent contractors, virtual assistants, and self-employed professionals. Do not provide advice for corporate taxation, mixed-income scenarios, or pure compensation earners.
 
 [OPERATIONAL GUIDELINES]
-1. Explain Philippine tax concepts in clear, jargon-free English or accessible Taglish suitable for early-career freelancers and young professionals.
+1. Explain Philippine tax concepts in clear, jargon-free English or accessible Taglish suitable for early-career Filipino freelancers and self-employed professionals.
 2. Whenever evaluating freelance or professional earnings under PHP 3,000,000, proactively compare the Optional 8% Flat Income Tax versus Graduated Tax Rates to identify the optimal legal tax savings.
-3. Incorporate the standard statutory deductions: PHP 250,000 baseline annual exemption, 13th-month pay exemption threshold (up to PHP 90,000), and mandatory contributions (SSS, PhilHealth, Pag-IBIG).
+3. Incorporate the standard statutory deductions: PHP 250,000 baseline annual exemption, 13th-month pay exemption threshold (up to PHP 90,000), and mandatory contributions (SSS, PhilHealth, Pag-IBIG) applicable to self-employed individuals.
 4. Provide structured, mathematical steps showing exactly how the tax was computed rather than providing isolated totals.
 
 [SAFETY & INJECTION DEFENSE RULES]
@@ -462,12 +462,12 @@ if "messages" not in st.session_state:
             "role": "assistant",
             "content": (
                 "### TaxEase Advisory Portal Initialized\n\n"
-                "I am your automated advisory assistant for Philippine Individual Income Tax compliance. "
+                "I am your tax compliance assistant for **Filipino freelancers and self-employed professionals**. "
                 "You may query the platform regarding:\n\n"
                 "- Comparative regime analysis: **TRAIN Act Graduated Schedule** vs. **Optional 8% Flat Income Tax**\n"
                 "- Statutory form compliance: **BIR Form 1901**, **Form 1701Q**, **Form 1701A**, and **Certificate 2316**\n"
-                "- Deadlines and filing procedures under the **Ease of Paying Taxes (EOPT) Act (RA 11976)**\n\n"
-                "*(Advisory Note: TaxEase PH is an academic research application. Calculations must be verified against official BIR forms prior to eFPS submission.)*"
+                "- Filing deadlines and procedures under the **Ease of Paying Taxes (EOPT) Act (RA 11976)**\n\n"
+                "*(Advisory Note: TaxEase PH is an academic research application scoped for freelancers and self-employed individuals. Calculations must be verified against official BIR forms prior to eFPS submission.)*"
             ),
         }
     ]
@@ -764,7 +764,7 @@ Under Republic Act No. 10963 (TRAIN Act) amending Section 109(BB) of the Nationa
 To register as an individual professional or freelance contractor with the Bureau of Internal Revenue:
 
 1. **Mandatory Documentation:**
-   - **BIR Form 1901** (Application for Registration for Self-Employed and Mixed Income Individuals) - 2 copies.
+   - **BIR Form 1901** (Application for Registration for Self-Employed Individuals) - 2 copies.
    - Valid Government Photo Identification Card showing residential address and date of birth.
    - DTI Certificate of Business Name Registration (if trading under a business name) or Professional Tax Receipt (PTR) / PRC ID (for licensed practitioners).
    - Proof of Place of Business / Residence (Barangay Clearance or Lease Agreement).
@@ -800,11 +800,17 @@ with tab_calc:
     
     with col_input:
         st.markdown(f"#### **{ICONS['calculator']} Taxpayer Parameters**", unsafe_allow_html=True)
-        taxpayer_type = st.selectbox(
-            "Taxpayer Category",
-            ["Freelancer / Self-Employed Professional", "Mixed-Income Earner", "Pure Compensation Earner"],
-            index=0,
+        st.markdown(
+            "<div style='margin-bottom: 4px;'>"
+            "<label style='font-size: 1.0rem; font-weight: 600; color: #94a3b8;'>Taxpayer Type</label>"
+            "</div>"
+            "<div style='font-size: 1.05rem; color: #38bdf8; font-weight: 600; margin-bottom: 14px; "
+            "padding: 7px 12px; background: #1e293b; border-radius: 7px; border: 1px solid #334155;'>"
+            "Freelancer / Self-Employed Professional"
+            "</div>",
+            unsafe_allow_html=True
         )
+        taxpayer_type = "Freelancer / Self-Employed Professional"
         
         st.markdown("<label style='font-size: 1.12rem; font-weight: 600; color: #f1f5f9; display: block; margin-bottom: 4px;'>Gross Annual Receipts / Client Fees (PHP)</label>", unsafe_allow_html=True)
         c_gross_txt, c_gross_minus, c_gross_plus = st.columns([10, 1.2, 1.2], gap="small")

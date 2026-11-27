@@ -31,13 +31,13 @@
 
 ### Slide 2: Problem Statement & Target Users
 - **The Problem:**
-  - Over 1.5 million Filipino freelancers, VAs, and gig workers struggle to navigate complex BIR regulations.
-  - Frequent confusion between the **TRAIN Act Graduated Rates** and the **Optional 8% Flat Tax**.
+  - Over 1.5 million Filipino freelancers, independent contractors, and self-employed professionals struggle to navigate complex BIR regulations.
+  - Frequent confusion between the **TRAIN Act Graduated Rates** and the **Optional 8% Flat Tax** among self-employed individuals.
   - Risk of high penalties (25% surcharge + 12% interest) from missed quarterly deadlines.
 - **Target Users:**
-  - Independent contractors, Upwork/Fiverr freelancers, Virtual Assistants, and graduating college seniors entering the workforce.
+  - Filipino freelancers, independent contractors, Upwork/Fiverr workers, Virtual Assistants, and self-employed professionals entering the workforce.
 - **Primary Goal:**
-  - Demystify BIR compliance through conversational guidance, real-time tax regime comparisons, and automated payslip parsing.
+  - Demystify BIR tax compliance for Filipino freelancers through conversational guidance, real-time tax regime comparisons, and automated payslip parsing.
 
 ### Slide 3: Core Features & Architecture
 1. **Real-Time Tax Liability Metrics Dashboard:** Live calculation of Taxable Base, Tax Due, Take-Home Pay, and Effective Tax Rate.
@@ -50,7 +50,8 @@
 - **Frontend / Framework:** **Streamlit** (Clean, reactive single-page app with `st.tabs`, `st.chat_message`, `st.chat_input`, and `st.session_state`).
 - **LLM Engine:** **Google Gemini API** (`gemini-2.5-flash` / `gemini-1.5-flash`) for low latency, high context capacity, and accessible free tier on Streamlit Community Cloud.
 - **Offline Fallback Engine:** Built-in statutory RAG and deterministic compliance engine so the application operates seamlessly even without an API key or internet.
-- **Knowledge Base (RAG):** Built-in statutory retrieval covering the NIRC, TRAIN Act (RA 10963), and Ease of Paying Taxes (EOPT) Act (RA 11976).
+- **Knowledge Base (RAG):** Built-in statutory retrieval covering the NIRC, TRAIN Act (RA 10963), and Ease of Paying Taxes (EOPT) Act (RA 11976) — scoped exclusively to freelancer and self-employed tax rules.
+- **Scope Decision:** We deliberately focused on Filipino freelancers and self-employed professionals to deliver a deep, accurate, and manageable scope — rather than a broad system spanning all taxpayer categories.
 - **Architectural Enhancements:** Full alignment with the proposal wireframe, upgraded with interactive steppers, payslip parsing, and statutory deductions (SSS, PhilHealth, Pag-IBIG).
 
 ### Slide 5: System Prompt Engineering
