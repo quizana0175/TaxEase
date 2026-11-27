@@ -12,13 +12,16 @@ Project Authors:
 """
 
 import os
-from typing import Any
+import re
+from typing import Any, Dict, Optional, Tuple
 import streamlit as st
 import pandas as pd
 from tax_calculator import (
     compare_tax_regimes,
     calculate_annual_mandatory_contributions,
-    parse_payslip_text,
+    calculate_8_percent_flat_tax,
+    calculate_train_graduated_tax,
+    parse_freelancer_income_text,
 )
 from prompt_defenses import (
     check_input_filter,
@@ -37,9 +40,372 @@ def parse_currency(val_str: Any, default: float = 0.0) -> float:
         return default
 
 
+def generate_gemini_response(api_key: str, prompt: str) -> str:
+    """Send a prompt to Gemini and return its non-empty text response."""
+    from google import genai
+
+    client = genai.Client(api_key=api_key)
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=prompt,
+    )
+    if not response.text or not response.text.strip():
+        raise RuntimeError("Gemini returned an empty response.")
+    return response.text.strip()
+
+
+def is_tax_calculation_question(user_input: str) -> bool:
+    lowered = user_input.lower()
+    asks_for_amount = re.search(
+        r"\b(how much|calculate|compute|estimate|owe|pay|tax due|tax liability|amount due|compare|better)\b",
+        lowered,
+    )
+    concerns_tax = re.search(r"\b(tax|taxes|bir|graduated|train|regime)\b|8\s*%", lowered)
+    return bool(asks_for_amount and concerns_tax)
+
+
+def detect_income_period(user_input: str) -> Optional[str]:
+    lowered = user_input.lower()
+    if re.search(r"\b(monthly|month|per month|every month|each month|a month)\b|/\s*mo\b", lowered):
+        return "monthly"
+    if re.search(r"\b(annual|annually|yearly|per year|every year|each year|a year|per annum)\b", lowered):
+        return "annual"
+    return None
+
+
+def parse_income_amount_and_period(
+    user_input: str,
+    allow_unlabelled_amount: bool = False,
+) -> Tuple[Optional[float], Optional[str]]:
+    lowered = user_input.lower()
+    income_terms = re.compile(
+        r"\b(earn(?:s|ed|ing)?|make|made|receive|received|income|gross|revenue|receipts|client fee|freelanc\w*)\b"
+    )
+    if not allow_unlabelled_amount and not income_terms.search(lowered):
+        return None, detect_income_period(user_input)
+
+    amount_pattern = re.compile(
+        r"(?<![\w.])(?:php\s*|₱\s*)?(\d[\d,]*(?:\.\d+)?)\s*([km]?)(?![\w%])",
+        re.IGNORECASE,
+    )
+    matches = list(amount_pattern.finditer(lowered))
+    if not matches:
+        return None, detect_income_period(user_input)
+
+    match = next(
+        (
+            candidate
+            for candidate in matches
+            if income_terms.search(lowered[max(0, candidate.start() - 60):candidate.start()])
+        ),
+        matches[0],
+    )
+    amount = float(match.group(1).replace(",", ""))
+    suffix = match.group(2).lower()
+    if suffix == "k":
+        amount *= 1000
+    elif suffix == "m":
+        amount *= 1000000
+    if amount <= 0:
+        return None, None
+
+    nearby_text = lowered[max(0, match.start() - 50):min(len(lowered), match.end() + 70)]
+    return amount, detect_income_period(nearby_text)
+
+
+def parse_tax_profile_details(user_input: str) -> Dict[str, Any]:
+    lowered = user_input.lower()
+    parsed = {
+        "vat_registered": None,
+        "elected_8pct": None,
+        "deduction_method": None,
+        "deductible_expenses": None,
+        "tax_credits": None,
+    }
+
+    vat_match = re.search(r"vat registered\s*[:=]\s*(yes|no)", lowered)
+    if vat_match:
+        parsed["vat_registered"] = vat_match.group(1) == "yes"
+
+    election_match = re.search(r"8\s*%\s*elected\s*[:=]\s*(yes|no)", lowered)
+    if election_match:
+        parsed["elected_8pct"] = election_match.group(1) == "yes"
+
+    deduction_match = re.search(r"deduction method\s*[:=]\s*(osd|itemi[sz]ed)", lowered)
+    if deduction_match:
+        parsed["deduction_method"] = (
+            "osd" if deduction_match.group(1) == "osd" else "itemized"
+        )
+
+    amount_patterns = {
+        "deductible_expenses": r"(?:annual )?deductible expenses\s*[:=]\s*(?:php\s*|₱\s*)?([\d,]+(?:\.\d+)?)",
+        "tax_credits": r"(?:quarterly payments/withholding credits|tax credits)\s*[:=]\s*(?:php\s*|₱\s*)?([\d,]+(?:\.\d+)?)",
+    }
+    for key, pattern in amount_patterns.items():
+        match = re.search(pattern, lowered)
+        if match:
+            parsed[key] = float(match.group(1).replace(",", ""))
+    return parsed
+
+
+def missing_tax_details(profile: Dict[str, Any]) -> list:
+    missing = []
+    gross_annual = profile.get("gross_annual")
+    if gross_annual is None:
+        return ["Gross income and whether it is monthly or annual"]
+    if profile["vat_registered"] is None:
+        missing.append("VAT registered: yes/no")
+    if (
+        gross_annual <= 3000000
+        and profile["vat_registered"] is not True
+        and profile["elected_8pct"] is None
+    ):
+        missing.append("8% elected: yes/no")
+
+    uses_8pct = (
+        gross_annual <= 3000000
+        and profile["vat_registered"] is False
+        and profile["elected_8pct"] is True
+    )
+    if not uses_8pct:
+        if profile["deduction_method"] is None:
+            missing.append("Deduction method: OSD or itemized")
+        elif profile["deduction_method"] == "itemized" and profile["deductible_expenses"] is None:
+            missing.append("Annual deductible expenses: PHP amount")
+    if profile["tax_credits"] is None:
+        missing.append("Quarterly payments/withholding credits: PHP amount (0 if none)")
+    return missing
+
+
+def build_regime_estimate(gross_annual: float) -> str:
+    flat_tax, _, flat_eligible = calculate_8_percent_flat_tax(gross_annual)
+    graduated_taxable_income = gross_annual * 0.60
+    graduated_income_tax, _ = calculate_train_graduated_tax(graduated_taxable_income)
+    percentage_tax = gross_annual * 0.03 if gross_annual <= 3000000 else None
+    graduated_total_tax = (
+        graduated_income_tax + percentage_tax
+        if percentage_tax is not None
+        else None
+    )
+    response = f"""### Estimated Philippine Freelancer Taxes
+
+**Gross receipts used:** PHP {gross_annual:,.2f} per year
+
+| Regime (assumptions) | Calculation | Estimated annual tax |
+| :--- | :--- | ---: |
+"""
+
+    if flat_eligible:
+        response += (
+            f"| Optional 8% (pure self-employment income; non-VAT; elected) | "
+            f"(PHP {gross_annual:,.2f} - PHP 250,000.00) x 8% | "
+            f"**PHP {flat_tax:,.2f}** |\n"
+        )
+    else:
+        response += (
+            "| Optional 8% | Not available because gross receipts exceed PHP 3,000,000 | "
+            "Not applicable |\n"
+        )
+
+    response += (
+        f"| Graduated rates + OSD (40% deduction; non-VAT) | "
+        f"Taxable income PHP {graduated_taxable_income:,.2f}; income tax "
+        f"PHP {graduated_income_tax:,.2f}"
+    )
+    if percentage_tax is not None:
+        response += (
+            f" + 3% percentage tax PHP {percentage_tax:,.2f} | "
+            f"**PHP {graduated_total_tax:,.2f}** |\n"
+        )
+    else:
+        response += " | Income tax only; VAT is not estimated here |\n"
+
+    if flat_eligible and graduated_total_tax is not None:
+        if flat_tax <= graduated_total_tax:
+            recommended_total = flat_tax
+            recommendation = (
+                f"Under these assumptions, the 8% option is lower by "
+                f"PHP {graduated_total_tax - flat_tax:,.2f}."
+            )
+        else:
+            recommended_total = graduated_total_tax
+            recommendation = (
+                f"Under these assumptions, graduated rates + OSD are lower by "
+                f"PHP {flat_tax - graduated_total_tax:,.2f}."
+            )
+        response += (
+            f"\n**Estimated lower option:** {recommendation} "
+            f"That is about **PHP {recommended_total / 12:,.2f} per month** to set aside."
+        )
+    elif graduated_total_tax is None:
+        response += (
+            f"\nEstimated graduated income tax is about **PHP {graduated_income_tax:,.2f}** "
+            f"per year (PHP {graduated_income_tax / 12:,.2f} per month), before VAT."
+        )
+
+    response += """
+
+This is the **full-year estimate before credits**, not necessarily the balance payable with the annual return. This comparison assumes pure freelance income, non-VAT registration, and 40% OSD for the graduated scenario. Verify your tax status and figures before filing."""
+    return response
+
+
+def build_tax_profile_prompt(profile: Dict[str, Any], missing: list) -> str:
+    if profile.get("gross_annual") is None:
+        return """To estimate your annual BIR tax, please reply with the following:
+- Gross income: PHP amount per month or per year
+- VAT registered: yes/no
+- 8% elected: yes/no
+- Deduction method: OSD or itemized
+- Annual deductible expenses: PHP amount (enter 0 if using OSD)
+- Quarterly payments/withholding credits: PHP amount (enter 0 if none)"""
+
+    return "To refine your estimate, please reply with:\n- " + "\n- ".join(missing)
+
+
+def calculate_final_tax_balance(profile: Dict[str, Any]) -> str:
+    gross_annual = profile["gross_annual"]
+    vat_registered = profile["vat_registered"]
+    uses_8pct = (
+        gross_annual <= 3000000
+        and vat_registered is False
+        and profile["elected_8pct"] is True
+    )
+
+    if uses_8pct:
+        taxable_base = max(0.0, gross_annual - 250000)
+        income_tax, _, _ = calculate_8_percent_flat_tax(gross_annual)
+        percentage_tax = 0.0
+        deduction_description = "PHP 250,000 statutory reduction"
+        regime = "Optional 8% (elected, non-VAT)"
+    else:
+        if profile["deduction_method"] == "osd":
+            deductions = gross_annual * 0.40
+            deduction_description = f"40% OSD = PHP {deductions:,.2f}"
+        else:
+            deductions = profile["deductible_expenses"]
+            deduction_description = f"Itemized expenses = PHP {deductions:,.2f}"
+        taxable_base = max(0.0, gross_annual - deductions)
+        income_tax, _ = calculate_train_graduated_tax(taxable_base)
+        percentage_tax = (
+            gross_annual * 0.03
+            if not vat_registered and gross_annual <= 3000000
+            else 0.0
+        )
+        regime = "Graduated rates"
+
+    annual_liability = income_tax + percentage_tax
+    tax_credits = profile["tax_credits"]
+    balance_due = max(0.0, annual_liability - tax_credits)
+    response = f"""### Your Estimated Annual Tax Balance
+
+- **Gross freelance receipts:** PHP {gross_annual:,.2f}
+- **Regime:** {regime}
+- **Deduction / reduction:** {deduction_description}
+- **Taxable base:** PHP {taxable_base:,.2f}
+- **Income tax:** PHP {income_tax:,.2f}
+- **Percentage tax:** PHP {percentage_tax:,.2f}
+- **Estimated full-year liability:** PHP {annual_liability:,.2f}
+- **Quarterly payments and withholding credits:** - PHP {tax_credits:,.2f}
+- **Estimated remaining balance:** **PHP {balance_due:,.2f}**
+"""
+    if tax_credits > annual_liability:
+        response += (
+            f"\nYour stated credits exceed this estimate by "
+            f"PHP {tax_credits - annual_liability:,.2f}; confirm how any overpayment "
+            "should be treated when filing."
+        )
+    if profile["elected_8pct"] and (vat_registered or gross_annual > 3000000):
+        response += "\nThe 8% option cannot be applied to the details provided; verify your VAT status and eligibility."
+    if vat_registered or gross_annual > 3000000:
+        response += "\nVAT due is not included; it depends on VATable sales and input-tax credits."
+    response += "\n\nEstimate only. Confirm eligibility, allowable deductions, payments, and filing amounts with the BIR or a tax professional."
+    return response
+
+
+def process_tax_calculation_input(
+    user_input: str,
+    pending_profile: Optional[Dict[str, Any]] = None,
+) -> Tuple[str, Optional[Dict[str, Any]]]:
+    is_followup = pending_profile is not None
+    profile = pending_profile or {
+        "income_amount": None,
+        "income_period": None,
+        "gross_annual": None,
+        "vat_registered": None,
+        "elected_8pct": None,
+        "deduction_method": None,
+        "deductible_expenses": None,
+        "tax_credits": None,
+    }
+    if not is_followup and not is_tax_calculation_question(user_input):
+        return "", None
+
+    income_terms_present = bool(
+        re.search(
+            r"\b(earn(?:s|ed|ing)?|make|made|receive|received|income|gross|revenue|receipts|client fee|freelanc\w*)\b",
+            user_input,
+            re.IGNORECASE,
+        )
+    )
+    other_profile_fields_present = bool(
+        re.search(
+            r"vat registered|8\s*%\s*elected|deduction method|deductible expenses|"
+            r"quarterly payments/withholding credits|tax credits",
+            user_input,
+            re.IGNORECASE,
+        )
+    )
+    amount, period = parse_income_amount_and_period(
+        user_input,
+        allow_unlabelled_amount=is_followup and not other_profile_fields_present,
+    )
+    if amount is not None and (profile["income_amount"] is None or income_terms_present):
+        profile["income_amount"] = amount
+    if period is not None:
+        profile["income_period"] = period
+    for key, value in parse_tax_profile_details(user_input).items():
+        if value is not None:
+            profile[key] = value
+
+    if profile["income_amount"] is not None and profile["income_period"] is not None:
+        if profile["income_period"] == "monthly":
+            profile["gross_annual"] = profile["income_amount"] * 12
+        else:
+            profile["gross_annual"] = profile["income_amount"]
+
+    if profile["gross_annual"] is None:
+        if profile["income_amount"] is not None:
+            response = (
+                f"I captured PHP {profile['income_amount']:,.2f}. Is that amount per month or per year? "
+                "Reply with 'monthly' or 'annual'."
+            )
+        else:
+            response = build_tax_profile_prompt(profile, [])
+        return response, profile
+
+    missing = missing_tax_details(profile)
+    if missing:
+        response = build_regime_estimate(profile["gross_annual"])
+        response += "\n\n" + build_tax_profile_prompt(profile, missing)
+        return response, profile
+
+    return calculate_final_tax_balance(profile), None
+
+
+def is_tax_profile_reply(user_input: str) -> bool:
+    lowered = user_input.lower()
+    return bool(
+        re.search(
+            r"\d|gross income|vat registered|8\s*%\s*elected|deduction method|"
+            r"deductible expenses|quarterly payments/withholding credits|tax credits|"
+            r"\b(monthly|annual|annually|yearly|per month|per year|cancel)\b|"
+            r"what (?:details|information|info) do you need",
+            lowered,
+        )
+    )
 
 st.set_page_config(
-    page_title="TaxEase PH | Philippine Income Tax & Advisory Assistant",
+    page_title="TaxEase PH | Philippine Freelancer Tax Assistant",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -442,7 +808,8 @@ You are TaxEase AI, an authoritative, pragmatic, and approachable Philippine tax
 1. Explain Philippine tax concepts in clear, jargon-free English or accessible Taglish suitable for early-career Filipino freelancers and self-employed professionals.
 2. Whenever evaluating freelance or professional earnings under PHP 3,000,000, proactively compare the Optional 8% Flat Income Tax versus Graduated Tax Rates to identify the optimal legal tax savings.
 3. Incorporate the standard statutory deductions: PHP 250,000 baseline annual exemption, 13th-month pay exemption threshold (up to PHP 90,000), and mandatory contributions (SSS, PhilHealth, Pag-IBIG) applicable to self-employed individuals.
-4. Provide structured, mathematical steps showing exactly how the tax was computed rather than providing isolated totals.
+4. When a freelancer provides an income amount and period, annualize it and show the calculation, tax-regime assumptions, annual liability, and estimated monthly amount to set aside. Never use dashboard income when the user gave a different amount.
+5. Provide structured, mathematical steps showing exactly how the tax was computed rather than providing isolated totals.
 
 [SAFETY & INJECTION DEFENSE RULES]
 1. Advisory Disclaimer: You are an informational AI assistant, not a licensed CPA or lawyer. Always include a brief disclaimer that computations should be verified prior to final filing on eBIRForms.
@@ -451,7 +818,7 @@ You are TaxEase AI, an authoritative, pragmatic, and approachable Philippine tax
 
 [OUTPUT FORMATTING RULES]
 1. Format tax computations in clean Markdown tables with explicit labels: Gross Revenue, Exemption / Allowable Deductions, Taxable Base, Applicable Rate, and Net Tax Due.
-2. Use bold highlights for critical deadlines and official BIR form numbers (e.g., BIR Form 1701Q, 1701A, 1901, 2316).
+2. Use bold highlights for critical deadlines and freelancer-relevant BIR form numbers (e.g., BIR Form 1701Q, 1701A, and 1901).
 3. Keep answers concise, factual, and strictly focused on Philippine jurisdiction."""
 
 
@@ -461,22 +828,34 @@ if "messages" not in st.session_state:
         {
             "role": "assistant",
             "content": (
-                "### TaxEase Advisory Portal Initialized\n\n"
+                "### TaxEase Freelancer Advisory Portal Initialized\n\n"
                 "I am your tax compliance assistant for **Filipino freelancers and self-employed professionals**. "
                 "You may query the platform regarding:\n\n"
                 "- Comparative regime analysis: **TRAIN Act Graduated Schedule** vs. **Optional 8% Flat Income Tax**\n"
-                "- Statutory form compliance: **BIR Form 1901**, **Form 1701Q**, **Form 1701A**, and **Certificate 2316**\n"
+                "- Statutory form compliance: **BIR Form 1901**, **Form 1701Q**, and **Form 1701A**\n"
                 "- Filing deadlines and procedures under the **Ease of Paying Taxes (EOPT) Act (RA 11976)**\n\n"
+                "For a personalized calculation, I will ask for your gross freelance income, period, VAT/8% status, deduction method, and any tax credits.\n\n"
                 "*(Advisory Note: TaxEase PH is an academic research application scoped for freelancers and self-employed individuals. Calculations must be verified against official BIR forms prior to eFPS submission.)*"
             ),
         }
     ]
 
 if "gross_annual" not in st.session_state:
-    st.session_state.gross_annual = 650000.0
+    st.session_state.gross_annual = 0.0
 
 if "annual_deductions" not in st.session_state:
-    st.session_state.annual_deductions = 87700.0
+    st.session_state.annual_deductions = 0.0
+
+if "sample_dashboard_defaults_cleared" not in st.session_state:
+    if (
+        st.session_state.gross_annual == 650000.0
+        and st.session_state.annual_deductions == 87700.0
+    ):
+        st.session_state.gross_annual = 0.0
+        st.session_state.annual_deductions = 0.0
+        st.session_state.gross_display = "0.00"
+        st.session_state.deductions_display = "0.00"
+    st.session_state.sample_dashboard_defaults_cleared = True
 
 if "gross_display" not in st.session_state:
     st.session_state.gross_display = f"{st.session_state.gross_annual:,.2f}"
@@ -486,6 +865,9 @@ if "deductions_display" not in st.session_state:
 
 if "tax_regime" not in st.session_state:
     st.session_state.tax_regime = "Optional 8% Flat Rate"
+
+if "pending_tax_profile" not in st.session_state:
+    st.session_state.pending_tax_profile = None
 
 
 
@@ -522,15 +904,32 @@ with st.sidebar:
                 api_key_from_secrets = st.secrets["GEMINI_API_KEY"]
         except Exception:
             api_key_from_secrets = ""
-        default_key = api_key_from_secrets or api_key_from_env
+        default_key = str(api_key_from_secrets or api_key_from_env).strip()
         
         gemini_api_key = st.text_input(
             "Gemini API Key",
             value=default_key,
             type="password",
             help="Optional. Built-in offline knowledge engine runs automatically if left blank.",
+            key="gemini_api_key_input",
         )
-        st.caption("Offline compliance engine active.")
+        if st.button("Test Gemini connection", key="test_gemini_connection"):
+            if not gemini_api_key.strip():
+                st.error("Enter a Gemini API key or configure GEMINI_API_KEY in your environment or Streamlit secrets.")
+            else:
+                try:
+                    generate_gemini_response(gemini_api_key.strip(), "Reply with OK.")
+                except Exception as error:
+                    st.error(
+                        f"Gemini connection failed ({type(error).__name__}). "
+                        "Check the key, model access, quota, and network connection."
+                    )
+                else:
+                    st.success("Gemini connection successful.")
+        if gemini_api_key.strip():
+            st.caption("A Gemini key is configured. Test the connection before chatting.")
+        else:
+            st.caption("No key configured; offline guidance will be used.")
 
 
 
@@ -570,7 +969,7 @@ st.markdown(f"""
         <span class="nav-brand-badge">TE</span>
         <span class="nav-brand-title">TaxEase PH</span>
         <span class="nav-divider">:</span>
-        <span class="nav-brand-subtitle">Philippine Income Tax & Advisory Assistant</span>
+        <span class="nav-brand-subtitle">Philippine Freelancer Tax Assistant</span>
     </div>
     <div class="nav-right">
         <span>Cebu Institute of Technology - University</span>
@@ -626,21 +1025,23 @@ with tab_chat:
                 {
                     "role": "assistant",
                     "content": (
-                        "### TaxEase Advisory Portal Initialized\n\n"
-                        "I am your automated advisory assistant for Philippine Individual Income Tax compliance. "
+                        "### TaxEase Freelancer Advisory Portal Initialized\n\n"
+                        "I am your automated advisory assistant for Philippine freelancer and independent-contractor tax compliance. "
                         "You may query the platform regarding:\n\n"
                         "- Comparative regime analysis: **TRAIN Act Graduated Schedule** vs. **Optional 8% Flat Income Tax**\n"
-                        "- Statutory form compliance: **BIR Form 1901**, **Form 1701Q**, **Form 1701A**, and **Certificate 2316**\n"
+                        "- Statutory form compliance: **BIR Form 1901**, **Form 1701Q**, and **Form 1701A**\n"
                         "- Deadlines and filing procedures under the **Ease of Paying Taxes (EOPT) Act (RA 11976)**\n\n"
+                        "For a personalized calculation, I will ask for your gross freelance income, period, VAT/8% status, deduction method, and any tax credits.\n\n"
                         "*(Advisory Note: TaxEase PH is an academic research application. Calculations must be verified against official BIR forms prior to eFPS submission.)*"
                     ),
                 }
             ]
+            st.session_state.pending_tax_profile = None
             st.rerun()
 
-    if len(st.session_state.messages) > 0 and st.session_state.messages[0]["content"].startswith("**TaxEase Advisory Portal Initialized.**"):
+    if len(st.session_state.messages) > 0 and st.session_state.messages[0]["content"].startswith("**TaxEase Freelancer Advisory Portal Initialized.**"):
         st.session_state.messages[0]["content"] = (
-            "### TaxEase Advisory Portal Initialized\n\n" + 
+            "### TaxEase Freelancer Advisory Portal Initialized\n\n" +
             st.session_state.messages[0]["content"].split("**\n\n", 1)[-1]
         )
     for msg in st.session_state.messages:
@@ -669,32 +1070,41 @@ with tab_chat:
 
 {safe_refusal}"""
         else:
-            retrieved_context = retrieve_relevant_bir_context(user_prompt)
-            final_llm_prompt = wrap_with_sandwich_defense(
-                system_prompt=TAXEASE_SYSTEM_PROMPT,
-                user_input=user_prompt,
-                retrieved_context=retrieved_context,
+            pending_profile = st.session_state.pending_tax_profile
+            if pending_profile and user_prompt.strip().lower() in {"cancel", "cancel estimate"}:
+                response_text = "Tax estimate cancelled. Ask a new tax question whenever you're ready."
+                st.session_state.pending_tax_profile = None
+            elif pending_profile and is_tax_profile_reply(user_prompt):
+                response_text, updated_profile = process_tax_calculation_input(
+                    user_prompt,
+                    pending_profile,
+                )
+                st.session_state.pending_tax_profile = updated_profile
+            else:
+                response_text, updated_profile = process_tax_calculation_input(user_prompt)
+                if updated_profile is not None:
+                    st.session_state.pending_tax_profile = updated_profile
+            calculation_answer = bool(response_text)
+            gemini_error = None
+            retrieved_context = (
+                retrieve_relevant_bir_context(user_prompt)
+                if not response_text
+                else ""
             )
-            
-            response_text = ""
-            if gemini_api_key:
+            if not response_text and gemini_api_key.strip():
+                final_llm_prompt = wrap_with_sandwich_defense(
+                    system_prompt=TAXEASE_SYSTEM_PROMPT,
+                    user_input=user_prompt,
+                    retrieved_context=retrieved_context,
+                )
                 try:
-                    from google import genai
-                    client = genai.Client(api_key=gemini_api_key)
-                    gemini_res = client.models.generate_content(
-                        model="gemini-2.5-flash",
-                        contents=final_llm_prompt,
+                    response_text = generate_gemini_response(
+                        gemini_api_key.strip(),
+                        final_llm_prompt,
                     )
-                    response_text = gemini_res.text
-                except Exception:
-                    try:
-                        import google.generativeai as legacy_genai
-                        legacy_genai.configure(api_key=gemini_api_key)
-                        model = legacy_genai.GenerativeModel("gemini-1.5-flash")
-                        gemini_res = model.generate_content(final_llm_prompt)
-                        response_text = gemini_res.text
-                    except Exception:
-                        response_text = ""
+                except Exception as error:
+                    gemini_error = type(error).__name__
+            gemini_used = bool(response_text) and not calculation_answer
             
             if not response_text:
                 u_lower = user_prompt.lower()
@@ -790,6 +1200,19 @@ To register as an individual professional or freelance contractor with the Burea
 
 *(Advisory Disclaimer: TaxEase PH is an educational AI application for CSIT 349 at CIT - University.)*"""
 
+            if not gemini_used and not calculation_answer:
+                if gemini_error:
+                    status_message = (
+                        f"**Gemini unavailable ({gemini_error}).** Showing offline guidance instead. "
+                        "Check the API Configuration in the sidebar."
+                    )
+                else:
+                    status_message = (
+                        "**Offline mode:** no Gemini API key is configured. "
+                        "Add one in the sidebar to enable AI-generated replies."
+                    )
+                response_text = f"{status_message}\n\n---\n\n{response_text}"
+
         st.session_state.messages.append({"role": "assistant", "content": response_text})
         st.rerun()
 
@@ -806,17 +1229,17 @@ with tab_calc:
             "</div>"
             "<div style='font-size: 1.05rem; color: #38bdf8; font-weight: 600; margin-bottom: 14px; "
             "padding: 7px 12px; background: #1e293b; border-radius: 7px; border: 1px solid #334155;'>"
-            "Freelancer / Self-Employed Professional"
+            "Philippine Freelancer / Independent Contractor"
             "</div>",
             unsafe_allow_html=True
         )
-        taxpayer_type = "Freelancer / Self-Employed Professional"
+        taxpayer_type = "Philippine Freelancer / Independent Contractor"
         
         st.markdown("<label style='font-size: 1.12rem; font-weight: 600; color: #f1f5f9; display: block; margin-bottom: 4px;'>Gross Annual Receipts / Client Fees (PHP)</label>", unsafe_allow_html=True)
         c_gross_txt, c_gross_minus, c_gross_plus = st.columns([10, 1.2, 1.2], gap="small")
         with c_gross_txt:
             gross_val_str = st.text_input(
-                "Gross Annual Receipts",
+                "Gross Annual Receipts / Client Fees",
                 value=st.session_state.gross_display,
                 label_visibility="collapsed",
                 help="Type annual earnings. Commas and decimals are automatically formatted on Enter.",
@@ -852,7 +1275,7 @@ with tab_calc:
         c_ded_txt, c_ded_minus, c_ded_plus = st.columns([10, 1.2, 1.2], gap="small")
         with c_ded_txt:
             deductions_val_str = st.text_input(
-                "Mandatory Statutory Deductions",
+                "Annual Deductible Deductions",
                 value=st.session_state.deductions_display,
                 label_visibility="collapsed",
                 help=f"Annual SSS (PHP {contrib['annual_sss']:,.0f}), PhilHealth (PHP {contrib['annual_philhealth']:,.0f}), Pag-IBIG (PHP {contrib['annual_pagibig']:,.0f})",
@@ -882,16 +1305,16 @@ with tab_calc:
         st.session_state.tax_regime = tax_regime_choice
         
         st.markdown("<hr style='margin: 12px 0 8px 0; border: none; border-top: 1px solid #1f2937;'>", unsafe_allow_html=True)
-        st.markdown(f"<div style='font-weight: 700; font-size: 1.15rem; color: #f1f5f9; margin-bottom: 2px;'>{ICONS['file']} Payslip / Income Parser</div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='font-weight: 700; font-size: 1.15rem; color: #f1f5f9; margin-bottom: 2px;'>{ICONS['file']} Freelancer Income Parser</div>", unsafe_allow_html=True)
         uploaded_file = st.file_uploader(
-            "Attach Statement (.txt or .csv)",
+            "Attach Invoice Summary, Statement, or CSV (.txt or .csv)",
             type=["txt", "csv"],
-            help="Auto-extracts gross compensation and deductions from payslips or text summaries.",
+            help="Extract gross freelance or client fee income from an invoice summary or text statement.",
         )
         if uploaded_file is not None:
             try:
                 content = uploaded_file.read().decode("utf-8")
-                parsed = parse_payslip_text(content)
+                parsed = parse_freelancer_income_text(content)
                 if parsed["gross_pay"] > 0:
                     st.success(f"Detected Gross: PHP {parsed['gross_pay']:,.2f}")
                     st.caption("Transfer this extracted amount directly into your calculator fields above:")
@@ -910,7 +1333,7 @@ with tab_calc:
 
         report_txt = f"""================================================================================
                     TAXEASE PH - TAX COMPLIANCE REPORT
-            Philippine Individual Income Tax & Advisory Assistant
+            Philippine Freelancer Tax & Advisory Assistant
 ================================================================================
 Course: CSIT 349 Section G01 | Cebu Institute of Technology - University
 Development Team:
@@ -1000,7 +1423,7 @@ ADVISORY & LEGAL DISCLAIMER:
                 Option 2: TRAIN Graduated Rates
             </div>
             <div style="font-size: 0.95rem; color: #cbd5e1; margin-bottom: 12px;">
-                Progressive schedule applying to compensation and professionals.
+                Progressive schedule for self-employed Philippine professionals.
             </div>
             <table style="width: 100%; font-size: 0.98rem; border-collapse: collapse;">
                 <tr style="border-bottom: 1px solid #1f2937;"><td style="padding: 8px 0; color: #cbd5e1;">Gross Annual Receipts</td><td style="text-align: right; font-weight: 600; font-family: 'JetBrains Mono', monospace;">PHP {st.session_state.gross_annual:,.2f}</td></tr>

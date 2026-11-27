@@ -116,7 +116,9 @@ def compare_tax_regimes(gross_annual: float, annual_deductions: float = 0.0) -> 
     
     # 2. 8% Flat Tax computation
     tax_8pct, exp_8pct, eligible_8pct = calculate_8_percent_flat_tax(gross_annual)
-    net_8pct = gross_annual - tax_8pct - annual_deductions
+    # The 8% option uses gross receipts less the PHP 250,000 exemption and
+    # does not additionally deduct business expenses or mandatory contributions.
+    net_8pct = gross_annual - tax_8pct
     effective_rate_8pct = (tax_8pct / gross_annual * 100) if gross_annual > 0 else 0.0
     
     # 3. Recommendation
@@ -161,9 +163,10 @@ def compare_tax_regimes(gross_annual: float, annual_deductions: float = 0.0) -> 
     }
 
 
-def parse_payslip_text(text: str) -> Dict[str, float]:
+def parse_freelancer_income_text(text: str) -> Dict[str, float]:
     """
-    Parses uploaded payslip or CSV text to extract key income and deduction figures.
+    Parses an uploaded freelance income summary or CSV to extract gross fees
+    and reported mandatory contribution figures.
     """
     import re
     

@@ -1,5 +1,5 @@
 ===========================================================
-TAXEASE PH - SAMPLE FREELANCE INCOME / PAYSLIP STATEMENT
+TAXEASE PH - SAMPLE FREELANCE INCOME STATEMENT
 ===========================================================
 Client Name: Global Tech Solutions Inc.
 Payee: Paton-og, Mhalia Nicole P.
@@ -12,4 +12,4 @@ Pag-IBIG Monthly Contribution: 400.00
 Total Mandatory Contributions: 73,200.00
 Withholding Tax Deducted: 0.00
 
-Status: Verified Independent Contractor Statement
+Status: Philippine Independent Contractor / Freelancer Statement

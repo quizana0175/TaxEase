@@ -12,6 +12,19 @@ from typing import List, Dict, Any
 
 BIR_KNOWLEDGE_DOCS = [
     {
+        "id": "freelancer_scope",
+        "title": "Philippine Freelancer and Independent-Contractor Tax Scope",
+        "keywords": ["freelancer", "independent contractor", "virtual assistant", "va", "upwork", "fiverr", "online work", "professional", "sole proprietor"],
+        "content": (
+            "Philippine freelancers and independent contractors who receive client fees are generally "
+            "treated as self-employed individuals or professionals. This includes VAs, designers, "
+            "developers, writers, tutors, and online sellers. Registration, books or simplified records, "
+            "quarterly payments, and annual filing depend on business/professional income, not on whether "
+            "the client is local or foreign. Foreign-platform income is still Philippine gross receipt "
+            "when it is received, and all material facts should be documented and reported."
+        ),
+    },
+    {
         "id": "bir_form_1901",
         "title": "BIR Form 1901: Application for Registration for Self-Employed & Professionals",
         "keywords": ["1901", "register", "registration", "freelancer", "dti", "tin", "requirements", "start", "books"],
@@ -47,20 +60,6 @@ BIR_KNOWLEDGE_DOCS = [
             "BIR Form 1701A is the Annual Income Tax Return for Individuals Earning Purely from Business/Profession "
             "under either Graduated Rates with Optional Standard Deduction (OSD) or the Optional 8% Flat Tax.\n"
             "- Filing Deadline: On or before APRIL 15 following the close of the calendar year.\n"
-            "- Pure compensation earners with a single employer and substitute filing are exempt from Form 1701A, "
-            "as Form 2316 serves as their final return."
-        ),
-    },
-    {
-        "id": "bir_form_2316",
-        "title": "Certificate of Compensation Payment / Tax Withheld (BIR Form 2316)",
-        "keywords": ["2316", "certificate", "payslip", "withholding", "compensation", "employer", "substitute"],
-        "content": (
-            "BIR Form 2316 is the Certificate of Compensation Payment/Tax Withheld issued by an employer to an employee.\n"
-            "- Shows total gross compensation income, non-taxable/exempt compensation (13th-month pay up to PHP 90,000, "
-            "SSS, PhilHealth, Pag-IBIG employee share), taxable compensation, and total tax withheld.\n"
-            "- Substitute Filing: If an employee has only one employer for the taxable year and tax was correctly withheld, "
-            "Form 2316 acts as the substitute annual income tax return."
         ),
     },
     {

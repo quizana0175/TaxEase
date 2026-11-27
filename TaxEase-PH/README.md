@@ -1,4 +1,4 @@
-# TaxEase PH: Philippine Income Tax & Advisory Assistant
+# TaxEase PH: Philippine Freelancer Tax Assistant
 
 [![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://streamlit.io)
 **Course:** CSIT 349: Applications of Data Science and Artificial Intelligence  
@@ -15,15 +15,17 @@
 ## 1. Project Overview & Problem Statement
 
 ### The Problem
-In the Philippines, the growing community of freelancers, virtual assistants (VAs), independent contractors, and early-career gig workers face significant hurdles navigating the Bureau of Internal Revenue (BIR) tax regulations. Tax laws such as the **TRAIN Act (RA 10963)** and the **Ease of Paying Taxes (EOPT) Act (RA 11976)** offer tax incentives (such as the Optional 8% Flat Tax), yet many taxpayers overpay or incur steep penalties due to confusing filing schedules, complex form requirements (BIR Forms 1901, 1701Q, 1701A, 2316), and mathematical friction.
+In the Philippines, freelancers, virtual assistants (VAs), independent contractors, creators, designers, developers, and other gig professionals face significant hurdles navigating Bureau of Internal Revenue (BIR) tax regulations. Tax laws such as the **TRAIN Act (RA 10963)** and the **Ease of Paying Taxes (EOPT) Act (RA 11976)** offer options such as the Optional 8% Flat Tax, yet users can overpay or incur penalties due to confusing filing schedules, form requirements (BIR Forms 1901, 1701Q, and 1701A), and calculations.
 
 ### The Solution: TaxEase PH
-**TaxEase PH** is an intelligent, conversational FinTech AI assistant that simplifies Philippine individual income tax compliance through:
+**TaxEase PH** is an intelligent, conversational FinTech AI assistant limited to Philippine freelancers and independent contractors earning self-employed income. It helps users:
 1. **Side-by-Side Tax Regime Comparison:** Deterministically computes whether the TRAIN Act Graduated Rates or the Optional 8% Flat Tax yields higher take-home pay.
-2. **Conversational Advisory Chatbot:** Powered by Google Gemini with contextual RAG referencing official BIR forms, rules, and statutory deadlines.
-3. **Document Parsing:** Automatically extracts gross revenue and statutory deductions from uploaded payslips or CSV summaries.
+2. **Conversational Advisory Chatbot:** Powered by Google Gemini with contextual BIR guidance; tax questions show a deterministic initial estimate, then request the income period, VAT/8% election status, deduction method, and tax credits needed for a personalized balance.
+3. **Freelance Income Parsing:** Automatically extracts gross client fees from uploaded invoice summaries or CSV statements.
 4. **Exportable Compliance Checklist:** One-click download of a tailored Compliance Report (`.txt`) filing calendar and requirements list.
 5. **Multi-Layered Prompt Defenses:** Hardened against prompt injection, jailbreaks, and illegal tax evasion requests.
+
+The dashboard starts with zero income and deductions rather than sample figures. Chat-based estimates use the income supplied in the conversation, not dashboard values.
 
 ---
 
@@ -105,7 +107,7 @@ TaxEase-PH/
 ├── README.md                   # Complete documentation and setup guide
 ├── PRESENTATION_SLIDES_GUIDE.md # 7-slide deck guide & 5-minute live demo script
 └── data/
-    └── sample_payslip.txt      # Test document for payslip parser
+    └── sample_freelance_income.txt  # Test document for the freelancer income parser
 ```
 
 ---
