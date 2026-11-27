@@ -1,0 +1,15 @@
+===========================================================
+TAXEASE PH - SAMPLE FREELANCE INCOME / PAYSLIP STATEMENT
+===========================================================
+Client Name: Global Tech Solutions Inc.
+Payee: Paton-og, Mhalia Nicole P.
+Period: Calendar Year 2026 Summary
+
+Gross Earnings / Client Fee: 650,000.00
+SSS Monthly Contribution: 4,200.00
+PhilHealth Monthly Contribution: 1,500.00
+Pag-IBIG Monthly Contribution: 400.00
+Total Mandatory Contributions: 73,200.00
+Withholding Tax Deducted: 0.00
+
+Status: Verified Independent Contractor Statement
