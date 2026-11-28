@@ -5,10 +5,13 @@
 **Section:** G01  
 **Institution:** College of Computer Studies, Cebu Institute of Technology - University  
 
-### Group Members:
-1. **Saranza, Ethan James L.** (BSIT - 4th Year)
-2. **Quizana, Louise Daniella V.** (BSIT - 4th Year)
-3. **Paton-og, Mhalia Nicole P.** (BSIT - 4th Year)
+### Group Members & Contributions
+
+| Member | Role | Key Contributions |
+| :--- | :--- | :--- |
+| **Paton-og, Mhalia Nicole P.** *(BSIT - 4th Year)* | Initial System Build, Architecture, UI & Presentation | Built the initial TaxEase PH application from the ground up, designed the system architecture and 4-tab Streamlit UI (`app.py`), live metrics dashboard, BIR deadlines & Form 1901 checklist, project documentation, and the 7-slide presentation deck (`TaxEase_PH_Presentation_Slides.pptx`). |
+| **Quizana, Louise Daniella V.** *(BSIT - 4th Year)* | Tax Computation Enhancements & Testing | Refined the freelancer-only tax computation logic (`tax_calculator.py`), 8% flat rate take-home rules, freelancer income file parser, offline freelancer tax estimator, and math/prompt testing. |
+| **Saranza, Ethan James L.** *(BSIT - 4th Year)* | Prompt Engineering & Security Defenses | Enhanced the 3-layer prompt defense module (`prompt_defenses.py`), anti-fraud guardrails, security evaluation sandbox, and attack scenario verification. |
 
 ---
 
@@ -53,17 +56,18 @@ TaxEase PH integrates **three distinct defense layers** satisfying the final ass
 
 ---
 
-## 3. How to Run Locally
+## 3. How to Start / Run the System Locally
 
 ### Prerequisites
 - Python 3.10+ installed
-- Google Gemini API Key (Optional for basic testing; intelligent offline demo mode is built-in)
+- Google Gemini API Key *(Optional — the built-in offline compliance engine and freelancer estimator run automatically if no key is provided)*
 
-### Installation Steps
+### Step-by-Step Startup Instructions
 
-1. **Clone or navigate to the repository:**
+1. **Clone the repository and open the app folder:**
    ```bash
-   cd TaxEase-PH
+   git clone https://github.com/quizana0175/TaxEase.git
+   cd TaxEase/TaxEase-PH
    ```
 
 2. **Install required dependencies:**
@@ -71,13 +75,21 @@ TaxEase PH integrates **three distinct defense layers** satisfying the final ass
    pip install -r requirements.txt
    ```
 
-3. **Run the Streamlit application:**
+3. **Start the Streamlit application:**
    ```bash
    python -m streamlit run app.py
    ```
+   *(If `streamlit` is on your PATH, `streamlit run app.py` also works.)*
 
-4. **Access the application:**  
-   Open your browser and navigate to `http://localhost:8501`.
+4. **Open the app in your browser:**  
+   Go to `http://localhost:8501`.
+
+5. **Optional — Connect a Gemini API Key:**  
+   - In the left sidebar, expand **System Settings → API Configuration**, paste your `GEMINI_API_KEY`, and press Enter (or click **Test Gemini Connection**).  
+   - Or create `.streamlit/secrets.toml` inside `TaxEase-PH` with:
+     ```toml
+     GEMINI_API_KEY = "your-google-gemini-api-key-here"
+     ```
 
 ---
 
@@ -104,10 +116,11 @@ TaxEase-PH/
 ├── knowledge_base.py           # Curated BIR statutory references & RAG context retriever
 ├── requirements.txt            # Application dependencies
 ├── .gitignore                  # Prevents committing API keys and virtual environments
-├── README.md                   # Complete documentation and setup guide
-├── PRESENTATION_SLIDES_GUIDE.md # 7-slide deck guide & 5-minute live demo script
+├── README.md                          # Complete documentation, member roles, and setup guide
+├── PRESENTATION_SLIDES_GUIDE.md       # 7-slide deck guide & 5-minute live demo script
+├── TaxEase_PH_Presentation_Slides.pptx # 7-slide presentation deck
 └── data/
-    └── sample_freelance_income.txt  # Test document for the freelancer income parser
+    └── sample_freelance_income.txt    # Test document for the freelancer income parser
 ```
 
 ---
